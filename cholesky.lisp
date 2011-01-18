@@ -8,11 +8,19 @@
     (0 0 0 0 2 -8 9 0)
     (0 0 0 0 1 -2 0 6)))
 
-(defparameter s 
-  (make-array 
-   (list 8 8)
-   :initial-contents
-   *s*))
+(defun afloat1 (list)
+  (make-array (length list)
+	      :element-type 'single-float
+	      :initial-contents
+	      (mapcar #'(lambda (x) (* 1s0 x)) list)))
+(defun afloat2 (lists)
+  (make-array (list (length lists) (length (first lists))) 
+	      :element-type 'single-float 
+	      :initial-contents 
+	      (mapcar #'(lambda (row)
+			  (mapcar #'(lambda (x) (* 1s0 x)) row))
+		      lists)))
+
 
 (defmacro with-arrays (arrays &body body)
   `(macrolet ,(mapcar 
@@ -24,7 +32,7 @@
 
 
 (defun cholesky (s)
-  (declare ((simple-array single-float 2) a l)
+  (declare ((simple-array single-float 2) s)
 	   (values (simple-array single-float 2) &optional))
   (destructuring-bind (r c) (array-dimensions s)
     (assert (= r c))
@@ -46,53 +54,62 @@
       l)))
 
 
+#+nil
+(cholesky (afloat2 *s*))
 
-(cholesky (make-array '(8 8) 
-		      :element-type 'single-float 
-		      :initial-contents (mapcar #'(lambda (row) 
-						    (mapcar #'(lambda (x) (* 1s0 x)) row))
-						*s*)))
+(defparameter *yt*  '(4 1 10 -18 16 8 -9 1))
 
-; fem for engineers p 475
-(defun cholesky2 (a l)
-  (declare ((simple-array single-float 2) a l)
-	   (values (simple-array single-float 2) &optional))
-  (let ((n (array-dimension a 0)))
-    (with-arrays (a l)
-      (dotimes (j n)
-	(setf (l j j) (a j j))
-	(dotimes (k (1- j))
-	  (decf (l j j) (expt (l j k) 2)))
-	(when (< 0 (l j j))
-	  (setf (l j j) (sqrt (l j j)))
-	  (loop for i from j below n do
-	       (setf (l i j) (a i j))
-	       (dotimes (k (1- j))
-		 (decf (l i j) (* (l i k)
-				  (l j k))))
-	       (setf (l i j) (/ (l i j)
-			   (l j j))
-		(l j i) (l i j)))))))
-  l)
+
+(defun forward-eliminate (l b)
+  "Solve l*y=b for y with lower triangular matrix L."
+  (let* ((n (length b))
+	 (y (make-array n
+			:element-type 'single-float)))
+    (with-arrays (l y b)
+      (dotimes (i n)
+	(setf (y i) (b i))
+	(dotimes (j i)
+	  (decf (y i) (* (y j) (l i j))))
+	(setf (y i) (/ (y i)
+		       (l i i)))))
+    y))
 
 #+nil
-(cholesky2 s s)
+(forward-eliminate (cholesky (afloat2 *s*))
+		   (afloat1 *yt*))
 
-; numerical recipes in C p 121
-(defun chold (a)
-  (let* ((n (array-dimension a 0))
-	 (l (make-array (list n n)))
-	 (s 0s0))
-    (with-arrays (a l)
-     (dotimes (i n)
-       (dotimes (j n)
-	 (setf s (a i j))
-	 (dotimes (k (1- j))
-	   (decf s (* (a i k)
-		      (a j k))))
-	 (if (= i j)
-	     (setf (l i i) (sqrt s))
-	     (setf (l j i) (/ s (l i i)))))))
-    l))
+(defun transpose (a)
+  (declare ((simple-array single-float 2) a)
+	   (values (simple-array single-float 2) &optional))
+  (destructuring-bind (r c) (array-dimensions a)
+   (let ((b (make-array (reverse (array-dimensions a))
+			:element-type 'single-float)))
+     (with-arrays (a b)
+       (dotimes (i r)
+	 (dotimes (j c)
+	   (setf (b j i) (a i j)))))
+     b)))
 
-(chold (make-array '(8 8) :initial-contents *s*))
+#+nil
+(transpose (afloat2 *s*))
+
+
+(defun back-substitute (u b)
+  "Solve u*y=b for y with upper triangular matrix U."
+  (let* ((n (length b))
+	 (y (make-array n
+			:element-type 'single-float)))
+    (with-arrays (u y b)
+      (loop for i from (1- n) downto 0 do
+	   (setf (y i) (b i))
+	   (loop for j from (1- n) above i do
+		(decf (y i) (* (y j) (u i j))))
+	   (setf (y i) (/ (y i)
+			  (u i i)))))
+    y))
+
+#+nil
+(let ((l (cholesky (afloat2 *s*))))
+  (back-substitute (transpose l)
+		   (forward-eliminate l
+				      (afloat1 *yt*))))
