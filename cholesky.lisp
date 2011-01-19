@@ -8,18 +8,32 @@
     (0 0 0 0 2 -8 9 0)
     (0 0 0 0 1 -2 0 6)))
 
+(deftype mat ()
+  `(simple-array single-float 2))
+
+(deftype vec ()
+  `(simple-array single-float 1))
+
+
+(defmacro make-vec (n &rest rest)
+  `(make-array ,n :element-type 'single-float
+	       ,@rest))
+
+(defmacro make-mat (n &rest rest)
+  `(make-array (list ,n ,n) :element-type 'single-float
+	       ,@rest))
+
 (defun afloat1 (list)
-  (make-array (length list)
-	      :element-type 'single-float
-	      :initial-contents
-	      (mapcar #'(lambda (x) (* 1s0 x)) list)))
+  (make-vec (length list)
+	    :initial-contents
+	    (mapcar #'(lambda (x) (* 1s0 x)) list)))
+
 (defun afloat2 (lists)
-  (make-array (list (length lists) (length (first lists))) 
-	      :element-type 'single-float 
-	      :initial-contents 
-	      (mapcar #'(lambda (row)
-			  (mapcar #'(lambda (x) (* 1s0 x)) row))
-		      lists)))
+  (make-mat (length lists)
+	    :initial-contents 
+	    (mapcar #'(lambda (row)
+			(mapcar #'(lambda (x) (* 1s0 x)) row))
+		    lists)))
 
 
 (defmacro with-arrays (arrays &body body)
@@ -32,12 +46,11 @@
 
 
 (defun cholesky (s)
-  (declare ((simple-array single-float 2) s)
-	   (values (simple-array single-float 2) &optional))
+  (declare (mat s)
+	   (values mat &optional))
   (destructuring-bind (r c) (array-dimensions s)
     (assert (= r c))
-    (let ((l (make-array (list r r)
-			 :element-type 'single-float)))
+    (let ((l (make-mat r)))
       (with-arrays (l s)
 	(dotimes (i r)
 	 (dotimes (k (+ i 1))
@@ -63,8 +76,7 @@
 (defun forward-eliminate (l b)
   "Solve l*y=b for y with lower triangular matrix L."
   (let* ((n (length b))
-	 (y (make-array n
-			:element-type 'single-float)))
+	 (y (make-vec n)))
     (with-arrays (l y b)
       (dotimes (i n)
 	(setf (y i) (b i))
@@ -79,8 +91,8 @@
 		   (afloat1 *yt*))
 
 (defun transpose (a)
-  (declare ((simple-array single-float 2) a)
-	   (values (simple-array single-float 2) &optional))
+  (declare (mat a)
+	   (values mat &optional))
   (destructuring-bind (r c) (array-dimensions a)
    (let ((b (make-array (reverse (array-dimensions a))
 			:element-type 'single-float)))
@@ -97,8 +109,7 @@
 (defun back-substitute (u b)
   "Solve u*y=b for y with upper triangular matrix U."
   (let* ((n (length b))
-	 (y (make-array n
-			:element-type 'single-float)))
+	 (y (make-vec n)))
     (with-arrays (u y b)
       (loop for i from (1- n) downto 0 do
 	   (setf (y i) (b i))
@@ -113,3 +124,32 @@
   (back-substitute (transpose l)
 		   (forward-eliminate l
 				      (afloat1 *yt*))))
+
+(defun solve (m y)
+  "Solve M x = y for x."
+  (declare (mat m)
+	   (vec y)
+	   (values vec &optional))
+  (let ((l (cholesky m)))
+    (back-substitute (transpose l)
+		     (forward-eliminate l
+					y))))
+
+#+nil
+(solve (afloat2 *s*) (afloat1 *yt*))
+
+(defparameter *nodes* 6)
+
+(defun make-connection-matrix ()
+  (let* ((ncon *nodes*)
+	 (ndis (* 2 (1- ncon)))
+	 (c (make-array (list ndis ncon))))
+    (with-arrays (c)
+      (dotimes (i ncon)
+	(dotimes (j ndis)
+	  (setf (c j i)
+		(if (= i (1+ (floor j 2)))
+		    1s0 0s0))))
+      c)))
+#+nil
+(make-connection-matrix)
