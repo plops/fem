@@ -138,8 +138,31 @@
 #+nil
 (solve (afloat2 *s*) (afloat1 *yt*))
 
-(defparameter *nodes* 6)
+(defparameter *problem*
+  '((:sending-end-voltage . 2s0)
+    (:resistivity . 1s0) ; per unit-length
+    (:conductivity . .5s0) ; per unit-length
+    (:segments . ((2 2s0) ; 2 elements each with length 1 near sending end
+		 (1 .5s0))))) ; another element with length .5
+#+nil
+(assoc :segments *problem*)
+(defun setup (prob)
+   (let* ((segs (rest (assoc :segments prob))) ; elements with length
+	  (x (destructuring-bind (num len) (first segs)
+	       (- (/ len num))))
+	  (pos (let ((res ()))
+		 (mapcar #'(lambda (nl)
+			     (destructuring-bind (num len) nl
+			       (dotimes (i num)
+				 (push (incf x (/ (* len (1+ i)) num))
+				       res))))
+			 segs)
+		 (reverse res))))
+     pos))
+ 
+(setup *problem*)
 
+#+nil
 (defun make-connection-matrix ()
   (let* ((ncon *nodes*)
 	 (ndis (* 2 (1- ncon)))
