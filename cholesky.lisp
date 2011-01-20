@@ -146,8 +146,14 @@
 		 (1 .5s0))))) ; another element with length .5
 #+nil
 (assoc :segments *problem*)
-(defun setup (prob)
-   (let* ((segs (rest (assoc :segments prob))) ; elements with length
+
+(defun get-param (name)
+  (rest (assoc name *problem*)))
+#+nil
+(get-param :segments)
+
+(defun setup ()
+   (let* ((segs (get-param :segments))	; elements with length
 	  (x (destructuring-bind (num len) (first segs)
 	       (- (/ len num))))
 	  (pos (let ((res ()))
@@ -158,21 +164,53 @@
 				       res))))
 			 segs)
 		 (reverse res))))
-     pos))
- 
-(setup *problem*)
+     (make-array (length pos) :element-type 'single-float
+		 :initial-contents pos)))
+#+nil 
+(setup)
 
-#+nil
-(defun make-connection-matrix ()
-  (let* ((ncon *nodes*)
-	 (ndis (* 2 (1- ncon)))
-	 (c (make-array (list ndis ncon))))
+(defun ndis (ncon)
+  (* 2 (1- ncon)))
+
+(defun make-connection-matrix (ncon)
+  (let* ((ndis (ndis ncon))
+	 (c (make-array (list ndis ncon)
+			:element-type 'single-float
+			:initial-element 0s0)))
     (with-arrays (c)
       (dotimes (i ncon)
-	(dotimes (j ndis)
-	  (setf (c j i)
-		(if (= i (1+ (floor j 2)))
-		    1s0 0s0))))
+	(setf (c i i) 1s0))
+      (dotimes (i (- ndis ncon))
+	(setf (c (+ ncon i) (1+ i)) 1s0))
       c)))
 #+nil
-(make-connection-matrix)
+(make-connection-matrix 6)
+
+(defun make-disjoint-coefficient-matrix (x)
+  (declare (vec x)
+	   (values mat &optional))
+  (let* ((ncon (length x))
+	 (ndis (ndis ncon))
+	 (c (make-mat ndis))
+	 (co (get-param :conductivity))
+	 (re (get-param :resistivity)))
+    (with-arrays (x c)
+     (loop for i below (- ndis 1) by 2 and j = (1+ i)
+	do
+	(let* ((p (floor j 2))
+	       (l (- (x (1+ p)) 
+		     (x p))))
+	  (when (< l 0s0)
+	    (error "Non-positive element length."))
+	  (let ((diag (+ (/ (* re l))
+			 (* 1/3 co l)))
+		(off (+ (/ (* -1 re l))
+			(* 1/6 co l))))
+	    (setf (c i i) diag
+		  (c i j) off
+		  (c j i) off
+		  (c j j) diag)))))
+    c))
+
+#+nil
+(make-disjoint-coefficient-matrix (setup))
