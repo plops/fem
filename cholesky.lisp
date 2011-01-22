@@ -142,8 +142,7 @@
   '((:sending-end-voltage . 2s0)
     (:resistivity . 1s0) ; per unit-length
     (:conductivity . .5s0) ; per unit-length
-    (:segments . ((2 2s0) ; 2 elements each with length 1 near sending end
-		 (1 .5s0))))) ; another element with length .5
+    (:segments . ((6 1s0))))) ; another element with length .5
 #+nil
 (assoc :segments *problem*)
 
@@ -174,14 +173,14 @@
 
 (defun make-connection-matrix (ncon)
   (let* ((ndis (ndis ncon))
-	 (c (make-array (list ndis ncon)
+	 (c (make-array (list ncon ndis)
 			:element-type 'single-float
 			:initial-element 0s0)))
     (with-arrays (c)
       (dotimes (i ncon)
 	(setf (c i i) 1s0))
       (dotimes (i (- ndis ncon))
-	(setf (c (+ ncon i) (1+ i)) 1s0))
+	(setf (c (1+ i) (+ ncon i)) 1s0))
       c)))
 #+nil
 (make-connection-matrix 6)
@@ -195,9 +194,9 @@
 	 (co (get-param :conductivity))
 	 (re (get-param :resistivity)))
     (with-arrays (x c)
-     (loop for i below (- ndis 1) by 2 and j = (1+ i)
-	do
-	(let* ((p (floor j 2))
+     (loop for i below (- ndis 1) by 2 do
+	(let* ((j (1+ i))
+	       (p (floor j 2))
 	       (l (- (x (1+ p)) 
 		     (x p))))
 	  (when (< l 0s0)
@@ -209,8 +208,104 @@
 	    (setf (c i i) diag
 		  (c i j) off
 		  (c j i) off
-		  (c j j) diag)))))
+		  (c j j) diag
+		  )))))
     c))
+
 
 #+nil
 (make-disjoint-coefficient-matrix (setup))
+
+
+
+;; book says:
+;; M_ij = C_ij Md_kl C_jl
+;;   oo     oo    **   oo
+;; M = C' Md C
+
+;; I say:
+;; M_ij = C_jl Md_kl C_ik
+;;   **     *o    oo   **
+
+;; their code
+;; M_kl = c_ki Md_ij c_lj
+;;   oo     o*    **   o*
+;; * .. many, o .. not many
+
+
+(defun make-connected-coefficient-matrix (c m)
+  (declare (mat c m)
+	   (values mat &optional))
+  (destructuring-bind (mr mcol) (array-dimensions m)
+   (destructuring-bind (r col) (array-dimensions c)
+     ;(assert (= mr mcol col))
+     (let ((mc (make-mat r)))
+       (with-arrays (mc c m)
+	 (dotimes (k r)
+	   (dotimes (l r)
+	     (let ((s 0s0))
+	       (dotimes (j col)
+		 (dotimes (i col)
+		   (incf s (* (c k i) (m i j) (c l j)))))
+	       (setf (mc k l) s))))
+	 mc)))))
+#+nil
+(let ((x (setup)))
+   (make-connected-coefficient-matrix
+    (make-connection-matrix (length x))
+    (make-disjoint-coefficient-matrix x)))
+
+(defun m* (a b)
+  "D = A . B" ;; D_ij = A_ik B_kj
+  (declare (mat a b)
+	   (values mat &optional))
+  (destructuring-bind (ar ac) (array-dimensions a)
+   (destructuring-bind (r c) (array-dimensions b)
+     (assert (= ar c))
+     (assert (= ac r))
+     (let ((d (make-array (list ar c)
+			  :element-type 'single-float)))
+       (with-arrays (a b d)
+	 (dotimes (i ar)
+	   (dotimes (j c)
+	     (let ((s 0s0))
+	       (dotimes (k r)
+		 (incf s (* (a i k) (b k j))))
+	       (setf (d i j) s))))
+	 d)))))
+
+(let* ((x (setup))
+       (md (make-disjoint-coefficient-matrix x))
+       (c (make-connection-matrix (length x)))
+       ;(md.c (m* md c))
+       )
+  (list (array-dimensions (transpose c))
+   ;(array-dimensions md.c)
+   (array-dimensions c)
+   (array-dimensions md))
+  #+nil(m* (transpose c)
+      md.c))
+
+(defun list->mat (lists)
+  (make-array (list (length lists) (length (first lists)))
+	      :element-type 'single-float
+	      :initial-contents 
+	      (mapcar #'(lambda (row)
+			  (mapcar #'(lambda (x) (* 1s0 x)) row))
+		      lists)))
+#+nil
+(m*
+ (list->mat '((1 2 3) (4 5 6)))
+ (list->mat '((1 2) (4 5) (7 8))))
+
+(defun transpose (a)
+  (declare (mat a)
+	   (values mat &optional))
+  (let ((b (make-array (reverse (array-dimensions a))
+		       :element-type 'single-float)))
+    (destructuring-bind (r c) (array-dimensions a)
+      (with-arrays (a b)
+       (dotimes (i r)
+	 (dotimes (j c)
+	   (setf (b j i) (a i j)))))
+      b)))
