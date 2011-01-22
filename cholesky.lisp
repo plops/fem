@@ -142,7 +142,9 @@
   '((:sending-end-voltage . 2s0)
     (:resistivity . 1s0) ; per unit-length
     (:conductivity . .5s0) ; per unit-length
-    (:segments . ((6 1s0))))) ; another element with length .5
+    (:segments . ((12 1s0)
+		  (12 .5s0)
+		  (12 .1s0))))) ; another element with length .5
 #+nil
 (assoc :segments *problem*)
 
@@ -218,15 +220,6 @@
 
 
 
-;; book says:
-;; M_ij = C_ij Md_kl C_jl
-;;   oo     oo    **   oo
-;; M = C' Md C
-
-;; I say:
-;; M_ij = C_jl Md_kl C_ik
-;;   **     *o    oo   **
-
 ;; their code
 ;; M_kl = c_ki Md_ij c_lj
 ;;   oo     o*    **   o*
@@ -255,48 +248,6 @@
     (make-connection-matrix (length x))
     (make-disjoint-coefficient-matrix x)))
 
-(defun m* (a b)
-  "D = A . B" ;; D_ij = A_ik B_kj
-  (declare (mat a b)
-	   (values mat &optional))
-  (destructuring-bind (ar ac) (array-dimensions a)
-   (destructuring-bind (r c) (array-dimensions b)
-     (assert (= ar c))
-     (assert (= ac r))
-     (let ((d (make-array (list ar c)
-			  :element-type 'single-float)))
-       (with-arrays (a b d)
-	 (dotimes (i ar)
-	   (dotimes (j c)
-	     (let ((s 0s0))
-	       (dotimes (k r)
-		 (incf s (* (a i k) (b k j))))
-	       (setf (d i j) s))))
-	 d)))))
-
-(let* ((x (setup))
-       (md (make-disjoint-coefficient-matrix x))
-       (c (make-connection-matrix (length x)))
-       ;(md.c (m* md c))
-       )
-  (list (array-dimensions (transpose c))
-   ;(array-dimensions md.c)
-   (array-dimensions c)
-   (array-dimensions md))
-  #+nil(m* (transpose c)
-      md.c))
-
-(defun list->mat (lists)
-  (make-array (list (length lists) (length (first lists)))
-	      :element-type 'single-float
-	      :initial-contents 
-	      (mapcar #'(lambda (row)
-			  (mapcar #'(lambda (x) (* 1s0 x)) row))
-		      lists)))
-#+nil
-(m*
- (list->mat '((1 2 3) (4 5 6)))
- (list->mat '((1 2) (4 5) (7 8))))
 
 (defun transpose (a)
   (declare (mat a)
@@ -309,3 +260,109 @@
 	 (dotimes (j c)
 	   (setf (b j i) (a i j)))))
       b)))
+
+(defun transpose-rhs (mcon)
+  (declare (mat mcon)
+	   (values mat vec &option))
+  (destructuring-bind (r c) (array-dimensions mcon)
+    (assert (= r c))
+    (let* ((v (get-param :sending-end-voltage))
+	   (mm (make-array (list (1- r) (1- c))
+			   :element-type 'single-float))
+	   (rhs (make-vec (1- r))))
+      (with-arrays (mm mcon rhs)
+       (dotimes (j (1- c))
+	 (dotimes (i (1- r))
+	   (setf (mm i j) (mcon i j))))
+       (dotimes (i (1- r))
+	 (setf (rhs i) (* -1 (mcon i (1- c)) v))))
+      (values mm rhs))))
+
+(defun solve-lossy-line ()
+  (let* ((x (setup))
+	 (mcon  (make-connected-coefficient-matrix
+		 (make-connection-matrix (length x))
+		 (make-disjoint-coefficient-matrix x))))
+    (multiple-value-bind (m y) (transpose-rhs mcon)
+      (let* ((sol (solve m y))
+	    (res (make-array (1+ (length sol)) ;; append end voltage
+			     :element-type 'single-float)))
+	(with-arrays (res sol)
+	 (dotimes (i (length sol))
+	   (setf (res i) (sol i)))
+	 (setf (res (length sol)) (get-param :sending-end-voltage)))
+	res))))
+
+#+nil
+(solve-lossy-line)
+
+(defun find-interval (x z)
+  (declare (vec x)
+	   (single-float z)
+	   (values fixnum &optional))
+  (with-arrays (x v)
+     (dotimes (i (1- (length x)))
+       (when (<= (x i) z (x (1+ i)))
+	 (return-from find-interval i)))
+     (error "value z=~a not in range of x." z)))
+
+(defun interpolate-solution (x v z)
+  (declare (vec x v)
+	   (single-float z)
+	   (values single-float &optional))
+  (with-arrays (v x)
+   (let* ((i (find-interval x z))
+	  (l (x i))
+	  (r (x (1+ i)))
+	  (len (- r l)))
+     (/ (+ (* (v (1+ i)) (- z l))
+	   (* (v i) (- r z))) len))))
+
+#+nil
+(let ((x (setup))
+      (v (solve-lossy-line)))
+  (interpolate-solution x v .4))
+
+(defun analytic-solution (z)
+  (let* ((r (get-param :resistivity))
+	 (g (get-param :conductivity))
+	 (v (get-param :sending-end-voltage))
+	 (l (let ((s (setup)))
+	      (aref s (1- (length s)))))
+	 (a (sqrt (* r g))))
+    (* v (/ (+ (exp (* a z)) (exp (* -1 a z)))
+	    (+ (exp (* a l)) (exp (* -1 a l)))))))
+
+#+nil
+(analytic-solution .3)
+
+(defun compare (&optional (n 10))
+  (let* ((x (setup))
+	 (v (solve-lossy-line))
+	 (l (aref x (1- (length x)))))
+   (loop for i upto  n collect
+	(let ((z (/ (* i l) n)))
+	  (list 
+	   z 
+	   (analytic-solution z)
+	   (interpolate-solution x v z))))))
+
+#+nil
+(compare)
+
+(defun plot ()
+  (with-open-file (s "/dev/shm/o.dat" :direction :output
+		     :if-does-not-exist :create
+		     :if-exists :supersede)
+   (let ((dat (compare 100)))
+     (format s "~{~{~6f ~}~%~}~%" dat)))
+  (with-open-file (s "/dev/shm/o.gp" :direction :output
+		     :if-does-not-exist :create
+		     :if-exists :supersede)
+    (format s "set term postscript~%")
+    (format s "set output \"/dev/shm/o.eps\"~%")
+    (format s "plot \"/dev/shm/o.dat\" u 1:2 w l, \"/dev/shm/o.dat\" u 1:3 w l~%"))
+  (sb-ext:run-program "/usr/bin/gnuplot" (list "/dev/shm/o.gp")))
+
+#+nil
+(plot)
