@@ -142,9 +142,8 @@
   '((:sending-end-voltage . 2s0)
     (:resistivity . 1s0) ; per unit-length
     (:conductivity . .5s0) ; per unit-length
-    (:segments . ((4 1)
-		  (1 1/2)
-		  (1 1/5))))) ; another element with length .5
+    (:segments . ((6 3)
+		  )))) ; another element with length .5
 #+nil
 (assoc :segments *problem*)
 
@@ -185,7 +184,27 @@
 	(setf (c (1+ i) (+ ncon i)) 1s0))
       c)))
 #+nil
-(make-connection-matrix 6)
+(print-binary-matrix
+ (make-connection-matrix (length (setup))))
+
+(defun print-binary-matrix (m)
+  (destructuring-bind (r c) (array-dimensions m)
+    (dotimes (i r)
+      (dotimes (j c)
+	(if (< (abs (aref m i j)) 0.1s0)
+	    (format t "_")
+	    (format t "*")))
+      (terpri))))
+
+(defun print-matrix (m)
+  (destructuring-bind (r c) (array-dimensions m)
+    (dotimes (i r)
+      (dotimes (j c)
+	(if (< -0.01s0 (aref m i j) 0.01s0)
+	    (format t "______")
+	    (format t "~5@f " (aref m i j))
+	    ))
+      (terpri))))
 
 (defun make-disjoint-coefficient-matrix (x)
   (declare (vec x)
@@ -216,7 +235,13 @@
 
 
 #+nil
-(make-disjoint-coefficient-matrix (setup))
+(print-binary-matrix
+ (make-disjoint-coefficient-matrix (setup)))
+
+#+nil
+(print-matrix
+ (make-disjoint-coefficient-matrix (setup)))
+
 
 
 
@@ -243,10 +268,12 @@
 	       (setf (mc k l) s))))
 	 mc)))))
 #+nil
-(let ((x (setup)))
+(#+nil print-binary-matrix
+ print-matrix
+ (let ((x (setup)))
    (make-connected-coefficient-matrix
     (make-connection-matrix (length x))
-    (make-disjoint-coefficient-matrix x)))
+    (make-disjoint-coefficient-matrix x))))
 
 #+nil
 (defun transpose (a)
@@ -354,7 +381,7 @@
   (with-open-file (s "/dev/shm/o.dat" :direction :output
 		     :if-does-not-exist :create
 		     :if-exists :supersede)
-   (let ((dat (compare 100)))
+   (let ((dat (compare (length (setup)))))
      (format s "~{~{~6f ~}~%~}~%" dat)))
   (with-open-file (s "/dev/shm/o.gp" :direction :output
 		     :if-does-not-exist :create
@@ -365,4 +392,4 @@
   (sb-ext:run-program "/usr/bin/gnuplot" (list "/dev/shm/o.gp")))
 
 #+nil
-(plot)
+(time (plot))
