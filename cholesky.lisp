@@ -142,9 +142,9 @@
   '((:sending-end-voltage . 2s0)
     (:resistivity . 1s0) ; per unit-length
     (:conductivity . .5s0) ; per unit-length
-    (:segments . ((12 1s0)
-		  (12 .5s0)
-		  (12 .1s0))))) ; another element with length .5
+    (:segments . ((4 1)
+		  (1 1/2)
+		  (1 1/5))))) ; another element with length .5
 #+nil
 (assoc :segments *problem*)
 
@@ -155,20 +155,20 @@
 
 (defun setup ()
    (let* ((segs (get-param :segments))	; elements with length
-	  (x (destructuring-bind (num len) (first segs)
-	       (- (/ len num))))
+	  (x 0)
 	  (pos (let ((res ()))
 		 (mapcar #'(lambda (nl)
 			     (destructuring-bind (num len) nl
 			       (dotimes (i num)
-				 (push (incf x (/ (* len (1+ i)) num))
+				 (push (incf x (/ len num))
 				       res))))
 			 segs)
 		 (reverse res))))
-     (make-array (length pos) :element-type 'single-float
-		 :initial-contents pos)))
+     (push 0s0 pos)
+     (afloat1 pos)))
 #+nil 
 (setup)
+
 
 (defun ndis (ncon)
   (* 2 (1- ncon)))
@@ -248,7 +248,7 @@
     (make-connection-matrix (length x))
     (make-disjoint-coefficient-matrix x)))
 
-
+#+nil
 (defun transpose (a)
   (declare (mat a)
 	   (values mat &optional))
@@ -263,7 +263,7 @@
 
 (defun transpose-rhs (mcon)
   (declare (mat mcon)
-	   (values mat vec &option))
+	   (values mat vec &optional))
   (destructuring-bind (r c) (array-dimensions mcon)
     (assert (= r c))
     (let* ((v (get-param :sending-end-voltage))
