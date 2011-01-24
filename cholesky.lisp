@@ -1,12 +1,12 @@
-#+nil
+#+nil ; for compiling this file in ecl into a standalone binary
 (progn
   (compile-file "cholesky.lisp" :output-file "cholesky.o" :system-p t)
   (c::build-program "cholesky" :lisp-files '("cholesky.o")))
 
 
 
-;(declaim (optimize (safety 3) (debug 3) (speed 2)))
-(declaim (optimize (safety 0) (debug 0) (speed 3)))
+(declaim (optimize (safety 3) (debug 3) (speed 1)))
+;(declaim (optimize (safety 0) (debug 0) (speed 3)))
 
 (deftype fun1 (args retval) 
   `(function ,args (values ,retval &optional)))
@@ -86,7 +86,7 @@
 
 (defparameter *yt*  '(4 1 10 -18 16 8 -9 1))
 
-
+(declaim (ftype (fun1 (mat vec) vec) forward-eliminate))
 (defun forward-eliminate (l b)
   "Solve l*y=b for y with lower triangular matrix L."
   (let* ((n (length b))
@@ -119,7 +119,7 @@
 #+nil
 (transpose (afloat2 *s*))
 
-
+(declaim (ftype (fun1 (mat vec) vec) back-substitute))
 (defun back-substitute (u b)
   "Solve u*y=b for y with upper triangular matrix U."
   (let* ((n (length b))
@@ -205,6 +205,22 @@
 (print-binary-matrix
  (make-connection-matrix (length (setup))))
 
+(defun make-connected-coefficient-matrix2 ()
+  (let* ((s (setup))
+	 (n (length s))
+	 (md (make-disjoint-coefficient-matrix s))
+	 (m (make-mat n)))
+    (with-arrays (m md)
+      (dotimes (i n)
+	(dotimes (j n)
+	  (cond ((= i j)
+		 (incf (m i j) (md i j)))
+		((= (+ n i -1) j)
+		 (incf (m i j) (md i j)))))))
+    m))
+
+
+
 (defun print-binary-matrix (m)
   (destructuring-bind (r c) (array-dimensions m)
     (dotimes (i r)
@@ -284,14 +300,39 @@
 		   (incf s (* (c k i) (m i j) (c l j)))))
 	       (setf (mc k l) s))))
 	 mc)))))
+
+;; Mcon_in = C_ji C_kn M_jk
+(declaim (ftype (fun1 (mat mat) mat)
+		make-connected-coefficient-matrix3))
+(defun make-connected-coefficient-matrix3 (c m)
+  (destructuring-bind (mz ms) (array-dimensions m)
+   (destructuring-bind (z s) (array-dimensions c)
+     (assert (= z mz ms))
+     (let ((mc (make-mat s)))
+       (with-arrays (mc c m)
+	 (dotimes (i s)
+	   (dotimes (n s)
+	     (dotimes (j z)
+	       (dotimes (k z)
+		 (incf (mc i n) (* (c j i) (c k n) (m j k)))))))
+	 mc)))))
+
+;; 0 -- 4  1 -- 5  2 -- 3          ((3 2))
+;; 0 -- 5  1 -- 6  2 -- 7  3 -- 4  ((4 2))
+
 #+nil
 (#+nil print-binary-matrix
  print-matrix
  #+nil progn
- (let ((x (setup)))
-   (make-connected-coefficient-matrix
-    (make-connection-matrix (length x))
-    (make-disjoint-coefficient-matrix x))))
+ (progn (def-problem 1 1 1 '((4 2)))
+  (let* ((x (setup))
+	 (md (make-disjoint-coefficient-matrix x))
+	 (c (transpose (make-connection-matrix (length x)))))
+    (print-matrix md)
+    (print-matrix c)
+    (make-connected-coefficient-matrix3
+     c
+     md))))
 
 (declaim (ftype (fun1 (mat mat) mat) m*))
 (defun m* (a b)
@@ -440,7 +481,9 @@
 	   (analytic-solution z)
 	   (interpolate-solution x v z))))))
 
-
+#+nil
+(compare)
+#+nil ; ecl
 (progn
  (format t "~{~{~6f ~}~%~}~%"
 	 (compare))
