@@ -192,14 +192,14 @@
 (ndis (length (setup)))
 (defun make-connection-matrix (ncon)
   (let* ((ndis (ndis ncon))
-	 (c (make-array (list ncon ndis)
+	 (c (make-array (list ndis ncon)
 			:element-type 'single-float
 			:initial-element 0s0)))
     (with-arrays (c)
       (dotimes (i ncon)
 	(setf (c i i) 1s0))
       (dotimes (i (- ndis ncon))
-	(setf (c (1+ i) (+ ncon i)) 1s0))
+	(setf (c (+ ncon i) (1+ i)) 1s0))
       c)))
 #+nil
 (print-binary-matrix
@@ -250,7 +250,7 @@
     (with-arrays (x c)
      (loop for i below (- ndis 1) by 2 do
 	(let* ((j (1+ i))
-	       (p (floor j 2))
+	       (p (floor i 2))
 	       (l (- (x (1+ p)) 
 		     (x p))))
 	  (when (< l 0s0)
@@ -285,8 +285,9 @@
 
 
 
-(declaim (ftype (fun1 (mat mat) mat) make-connected-coefficient-matrix))
-(defun make-connected-coefficient-matrix (c m)
+(declaim (ftype (fun1 (mat mat) mat) 
+		make-connected-coefficient-matrix3))
+(defun make-connected-coefficient-matrix3 (c m)
   (destructuring-bind (mr mcol) (array-dimensions m)
    (destructuring-bind (r col) (array-dimensions c)
      (assert (= mr mcol col))
@@ -300,11 +301,12 @@
 		   (incf s (* (c k i) (m i j) (c l j)))))
 	       (setf (mc k l) s))))
 	 mc)))))
-
+;; W=v^T_i M_ik v_k
+;;  =w^T_i C_ji M_jk C_kn w_n
 ;; Mcon_in = C_ji C_kn M_jk
 (declaim (ftype (fun1 (mat mat) mat)
-		make-connected-coefficient-matrix3))
-(defun make-connected-coefficient-matrix3 (c m)
+		make-connected-coefficient-matrix))
+(defun make-connected-coefficient-matrix (c m)
   (destructuring-bind (mz ms) (array-dimensions m)
    (destructuring-bind (z s) (array-dimensions c)
      (assert (= z mz ms))
@@ -320,115 +322,93 @@
 ;; 0 -- 4  1 -- 5  2 -- 3          ((3 2))
 ;; 0 -- 5  1 -- 6  2 -- 7  3 -- 4  ((4 2))
 
+(declaim (ftype (fun1 (mat fixnum fixnum) mat)
+		swap-rows))
+(defun swap-rows (m r q)
+  (let* ((n (array-dimension m 0))
+	 (b (make-mat n)))
+    (with-arrays (m b)
+      (dotimes (i n)
+	(cond 
+	  ((= i r) (dotimes (j n)
+		     (setf (b i j) (m q j))))
+	  ((= i q) (dotimes (j n)
+		     (setf (b i j) (m r j))))
+	  (t (dotimes (j n)
+	       (setf (b i j) (m i j)))))))
+    b))
+
+(declaim (ftype (fun1 (vec fixnum fixnum) vec)
+		swap-cols))
+(defun v-swap-cols (v r q)
+  (let* ((n (length v))
+	 (b (make-vec n)))
+    (with-arrays (v b)
+      (dotimes (i n)
+	(cond ((= i r) (setf (b i) (v q)))
+	      ((= i q) (setf (b i) (v r)))
+	      (t (setf (b i) (v i))))))
+    b))
+
 #+nil
 (#+nil print-binary-matrix
- print-matrix
- #+nil progn
- (progn (def-problem 1 1 1 '((4 2)))
+ #+nil print-matrix
+ progn
+ (progn (def-problem 1 1 1 '((6 2)))
   (let* ((x (setup))
 	 (md (make-disjoint-coefficient-matrix x))
-	 (c (transpose (make-connection-matrix (length x)))))
+	 (c (make-connection-matrix (length x)))
+	 (cmc (make-connected-coefficient-matrix
+	       c
+	       md)))
     (print-matrix md)
     (print-matrix c)
-    (make-connected-coefficient-matrix3
-     c
-     md))))
+    (print-matrix cmc)
+    (multiple-value-bind (m y) (transpose-rhs cmc)
+      (print-matrix m)
+      (format t "~A~%" y)
+      (format t "~a~%" (solve m y))
+      (format t "~A~%" (v-swap-cols y 1 0))
+      (format t "~a~%" (solve (swap-rows m 1 0) 
+			      (v-swap-cols y 1 0)))))))
 
-(declaim (ftype (fun1 (mat mat) mat) m*))
-(defun m* (a b)
-  "c = a.b; size of c is reduced if one either a or b is too small"
-  ;; zeile mal spalte
-  ;;          rc   rc   
-  ;; c_ij = a_ik b_kj
-  ;;   rc     
-  ;; ca = rb : spalten_a=zeilen_b
-  ;; cc = min(ca,rb)
-  ;; rc = min(ra,cb)
-  (destructuring-bind (ra ca) (array-dimensions a)
-    (destructuring-bind (rb cb) (array-dimensions b)
-      (let* ((rc (min ra cb))
-	     (sc (min ca rb))
-	     (cc (min sc cb))
-	     (c (make-array (list rc cc)
-			    :element-type 'single-float)))
-	(with-arrays (a b c)
-	 (dotimes (i rc)
-	   (dotimes (j cc)
-	     (dotimes (k sc)
-	       (incf (c i j) (* (a i k) (b k j)))))))
-	c))))
-#+nil
-(m* (afloat2 '((1 2 0 0)
-	       (3 4 0 0)
-	       (0 0 6 7)
-	       (0 0 6 3)))
-    (afloat2 '((1 0 0)
-	       (0 1 0)
-	       (0 0 1)
-	       (0 1 0))))
-#+nil
-(m*
- (transposition
-  (afloat2 '((1 0 0)
-	     (0 1 0)
-	     (0 0 1)
-	     (0 1 0))))
- (afloat2 '((1 2 0 0)
-	    (3 4 0 0)
-	    (0 0 6 7)
-	    (0 0 6 3)))
-    )
-
-#+nil
-(progn
-  (def-problem 1 1 1 '((5 2)))
-  (let ((m (make-disjoint-coefficient-matrix (setup)))
-	(c (make-connection-matrix (length (setup)))))
-    (print-matrix m)
-    (terpri)
-    (print-matrix (transposition c))
-    (terpri)
-    (print-matrix (m* m (transposition c)))
-    (terpri)
-    (print-matrix c)
-    (terpri)
-    (print-matrix (m* c (m* m (transposition c))))))
-
-
-(declaim (ftype (function (mat) (values mat vec &optional)) transpose-rhs))
+(declaim (ftype (function (mat) (values mat vec &optional))
+		transpose-rhs))
 (defun transpose-rhs (mcon)
   (destructuring-bind (r c) (array-dimensions mcon)
     (assert (= r c))
     (let* ((v (get-param :sending-end-voltage))
-	   (mm (make-array (list (1- r) (1- c))
-			   :element-type 'single-float))
-	   (rhs (make-vec (1- r))))
+	   (p (1- r))
+	   (mm (make-mat p))
+	   (rhs (make-vec p)))
       (with-arrays (mm mcon rhs)
-       (dotimes (j (1- c))
-	 (dotimes (i (1- r))
+       (dotimes (j p)
+	 (dotimes (i p)
 	   (setf (mm i j) (mcon i j))))
-       (dotimes (i (1- r))
+       (dotimes (i p)
 	 (setf (rhs i) (* -1 (mcon i (1- c)) v))))
       (values mm rhs))))
 
 (declaim (ftype (fun1 () vec) solve-lossy-line))
 (defun solve-lossy-line ()
   (let* ((x (setup))
-	 (mcon  (make-connected-coefficient-matrix
-		 (make-connection-matrix (length x))
-		 (make-disjoint-coefficient-matrix x))))
+	 (mcon (make-connected-coefficient-matrix
+		(make-connection-matrix (length x))
+		(make-disjoint-coefficient-matrix x))))
     (multiple-value-bind (m y) (transpose-rhs mcon)
       (let* ((sol (solve m y))
-	    (res (make-array (1+ (length sol)) ;; append end voltage
-			     :element-type 'single-float)))
-	(with-arrays (res sol)
-	 (dotimes (i (length sol))
+	     (n (length sol))
+	     (res (make-array (1+ n)
+			      ;; append end voltage
+			      :element-type 'single-float)))
+	#+nil(with-arrays (res sol)
+	 (dotimes (i n)
 	   (setf (res i) (sol i)))
-	 (setf (res (length sol)) (get-param :sending-end-voltage)))
+	 (setf (res n) (get-param :sending-end-voltage)))
 	res))))
 
 #+nil
-(def-problem 1s0 1s0 1s0 '((17 2)))
+(def-problem 1s0 1s0 1s0 '((4 2)))
 #+nil
 (solve-lossy-line)
 
@@ -488,20 +468,27 @@
  (format t "~{~{~6f ~}~%~}~%"
 	 (compare))
  (ext:quit 0))
+
 #+nil
 (defun plot ()
   (with-open-file (s "/dev/shm/o.dat" :direction :output
 		     :if-does-not-exist :create
 		     :if-exists :supersede)
    (let ((dat (compare (length (setup)))))
-     (format s "~{~{~6f ~}~%~}~%" dat)))
+     (dolist (e dat)
+       (format s "~f ~f~%" (first e) (- (second e)
+					  (third e))))
+     #+nil (format s "~{~{~6f ~}~%~}~%" dat)))
   (with-open-file (s "/dev/shm/o.gp" :direction :output
 		     :if-does-not-exist :create
 		     :if-exists :supersede)
     (format s "set term postscript~%")
     (format s "set output \"/dev/shm/o.eps\"~%")
-    (format s "plot \"/dev/shm/o.dat\" u 1:2 w l, \"/dev/shm/o.dat\" u 1:3 w l~%"))
+    #+nil (format s "plot \"/dev/shm/o.dat\" u 1:2 w l, \"/dev/shm/o.dat\" u 1:3 w l~%")
+    (format s "plot \"/dev/shm/o.dat\" u 1:2 w l~%"))
   (sb-ext:run-program "/usr/bin/gnuplot" (list "/dev/shm/o.gp")))
 
 #+nil
-(time (plot))
+(progn
+  (def-problem 1s0 1s0 1s0 '((85 2)))
+  (time (plot)))
